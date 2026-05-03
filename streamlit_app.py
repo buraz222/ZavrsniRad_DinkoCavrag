@@ -68,13 +68,13 @@ def peak_containment_score(song_freqs: np.ndarray, song_mag: np.ndarray, seg_fre
     return matches / len(seg_peaks)
 
 
-st.set_page_config(page_title="Shazam Demo", layout="wide")
+st.set_page_config(page_title="Shazam demonstracija", layout="wide")
 st.title("Shazam Demonstracija")
 st.write("Učitaj pjesmu i segmente, izračunaj RFFT spektre i usporedi original s izvedbom.")
 if "perf_audio" not in st.session_state:
     st.session_state["perf_audio"] = None
 
-st.subheader("Shazam demo: cijela pjesma + segmenti")
+st.subheader("Shazam demonstracija: cijela pjesma i segmenti")
 song_file = st.file_uploader("Učitaj cijelu pjesmu", type=["wav", "mp3", "flac", "ogg", "m4a"])
 n_segments = st.number_input("Broj segmenata", min_value=1, max_value=12, value=6, step=1)
 mode = st.radio("Način odabira segmenata", ["Automatski", "Ručno"])
@@ -139,7 +139,7 @@ if song_file is not None:
         ax.legend()
         st.pyplot(fig)
 
-        st.write("**Containment segmenta unutar pjesme (dominantni peakovi):**")
+        st.write("**Sadržanost segmenta u pjesmi (dominantni vrhovi spektra):**")
         for i, score in scores:
             st.write(f"- Segment {i}: {score * 100:.1f}% poklapanja")
 
@@ -179,8 +179,8 @@ if song_file is not None:
 
             c1, c2, c3 = st.columns(3)
             c1.metric("Cosine sličnost", f"{cosine:.3f}")
-            c2.metric("Peak overlap", f"{overlap * 100:.1f}%")
-            c3.metric("Demo score", f"{score * 100:.1f}/100")
+            c2.metric("Preklapanje vrhova", f"{overlap * 100:.1f}%")
+            c3.metric("Ukupna ocjena", f"{score * 100:.1f}/100")
 
             fig2, ax2 = plt.subplots(figsize=(13, 6))
             ax2.plot(song_freqs, song_mag, label="Original", linewidth=1.4)
