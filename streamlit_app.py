@@ -73,6 +73,60 @@ st.title("Shazam Demonstracija")
 st.write("Učitaj pjesmu i segmente, izračunaj RFFT spektre i usporedi original s izvedbom.")
 if "perf_audio" not in st.session_state:
     st.session_state["perf_audio"] = None
+if "spectrum_segments" not in st.session_state:
+    st.session_state["spectrum_segments"] = None
+if "comparison_result" not in st.session_state:
+    st.session_state["comparison_result"] = None
+
+
+def compute_segment_spectrum_cache(
+    song_audio: np.ndarray, sr: int, segments: List[Tuple[float, float]]
+) -> dict:
+    song_freqs, song_mag = rfft_spectrum(song_audio, sr)
+    curves: List[Tuple[np.ndarray, np.ndarray, int]] = []
+    scores: List[Tuple[int, float]] = []
+    for i, (start, dur) in enumerate(segments, start=1):
+        a = int(start * sr)
+        b = int((start + dur) * sr)
+        seg = song_audio[a:b]
+        if len(seg) < 2048:
+            continue
+        seg_freqs, seg_mag = rfft_spectrum(seg, sr)
+        curves.append((seg_freqs, seg_mag, i))
+        score = peak_containment_score(song_freqs, song_mag, seg_freqs, seg_mag)
+        scores.append((i, score))
+    return {"song_freqs": song_freqs, "song_mag": song_mag, "curves": curves, "scores": scores}
+
+
+def render_segment_spectrum_figure(cache: dict, figsize: Tuple[float, float] = (13, 7)):
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.plot(cache["song_freqs"], cache["song_mag"], linewidth=1.4, label="Cijela pjesma")
+    for seg_freqs, seg_mag, i in cache["curves"]:
+        ax.plot(seg_freqs, seg_mag, linewidth=1.2, label=f"Segment {i}")
+    ax.set_xlabel("Frekvencija (Hz)")
+    ax.set_ylabel("Normalizirana magnituda")
+    ax.set_title("RFFT: cijela pjesma i segmenti")
+    ax.grid(alpha=0.3)
+    ax.legend()
+    return fig
+
+
+def render_compare_figure(
+    song_freqs: np.ndarray,
+    song_mag: np.ndarray,
+    perf_freqs: np.ndarray,
+    perf_mag: np.ndarray,
+    figsize: Tuple[float, float] = (6.4, 5),
+):
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.plot(song_freqs, song_mag, label="Original", linewidth=1.4)
+    ax.plot(perf_freqs, perf_mag, label="Izvedba", linewidth=1.2)
+    ax.set_xlabel("Frekvencija (Hz)")
+    ax.set_ylabel("Normalizirana magnituda")
+    ax.set_title("Original vs izvedba (RFFT)")
+    ax.grid(alpha=0.3)
+    ax.legend()
+    return fig
 
 st.subheader("Shazam demonstracija: cijela pjesma i segmenti")
 song_file = st.file_uploader("Učitaj cijelu pjesmu", type=["wav", "mp3", "flac", "ogg", "m4a"])
@@ -116,32 +170,7 @@ if song_file is not None:
             segments.append((float(start), float(dur)))
 
     if st.button("Izračunaj i prikaži spektre"):
-        song_freqs, song_mag = rfft_spectrum(song_audio, sr)
-        fig, ax = plt.subplots(figsize=(13, 7))
-        ax.plot(song_freqs, song_mag, linewidth=1.4, label="Cijela pjesma")
-
-        scores = []
-        for i, (start, dur) in enumerate(segments, start=1):
-            a = int(start * sr)
-            b = int((start + dur) * sr)
-            seg = song_audio[a:b]
-            if len(seg) < 2048:
-                continue
-            seg_freqs, seg_mag = rfft_spectrum(seg, sr)
-            ax.plot(seg_freqs, seg_mag, linewidth=1.2, label=f"Segment {i}")
-            score = peak_containment_score(song_freqs, song_mag, seg_freqs, seg_mag)
-            scores.append((i, score))
-
-        ax.set_xlabel("Frekvencija (Hz)")
-        ax.set_ylabel("Normalizirana magnituda")
-        ax.set_title("RFFT: cijela pjesma i segmenti")
-        ax.grid(alpha=0.3)
-        ax.legend()
-        st.pyplot(fig)
-
-        st.write("**Sadržanost segmenta u pjesmi (dominantni vrhovi spektra):**")
-        for i, score in scores:
-            st.write(f"- Segment {i}: {score * 100:.1f}% poklapanja")
+        st.session_state["spectrum_segments"] = compute_segment_spectrum_cache(song_audio, sr, segments)
 
     st.markdown("---")
     st.subheader("Usporedba originala i tvoje izvedbe")
@@ -177,17 +206,63 @@ if song_file is not None:
             overlap = peak_containment_score(song_freqs, song_mag, perf_freqs, perf_mag)
             score = 0.7 * cosine + 0.3 * overlap
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Cosine sličnost", f"{cosine:.3f}")
-            c2.metric("Preklapanje vrhova", f"{overlap * 100:.1f}%")
-            c3.metric("Ukupna ocjena", f"{score * 100:.1f}/100")
+            st.session_state["comparison_result"] = {
+                "song_freqs": song_freqs,
+                "song_mag": song_mag,
+                "perf_freqs": perf_freqs,
+                "perf_mag": perf_mag,
+                "cosine": cosine,
+                "overlap": overlap,
+                "score": score,
+            }
 
-            fig2, ax2 = plt.subplots(figsize=(13, 6))
-            ax2.plot(song_freqs, song_mag, label="Original", linewidth=1.4)
-            ax2.plot(perf_freqs, perf_mag, label="Izvedba", linewidth=1.2)
-            ax2.set_xlabel("Frekvencija (Hz)")
-            ax2.set_ylabel("Normalizirana magnituda")
-            ax2.set_title("Original vs izvedba (RFFT)")
-            ax2.grid(alpha=0.3)
-            ax2.legend()
-            st.pyplot(fig2)
+    seg_cache = st.session_state.get("spectrum_segments")
+    cmp_res = st.session_state.get("comparison_result")
+
+    if cmp_res is not None:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Cosine sličnost", f"{cmp_res['cosine']:.3f}")
+        c2.metric("Preklapanje vrhova", f"{cmp_res['overlap'] * 100:.1f}%")
+        c3.metric("Ukupna ocjena", f"{cmp_res['score'] * 100:.1f}/100")
+
+        st.subheader("Spektri (istovremeni prikaz)")
+        if seg_cache is not None:
+            st.caption("Lijevo: cijela pjesma i segmenti. Desno: original i tvoja izvedba (isti vremenski odsječak koliko dopuštaju snimke).")
+            col_a, col_b = st.columns(2, gap="medium")
+            with col_a:
+                fig_left = render_segment_spectrum_figure(seg_cache, figsize=(6.4, 5))
+                st.pyplot(fig_left, use_container_width=True)
+                plt.close(fig_left)
+            with col_b:
+                fig_cmp = render_compare_figure(
+                    cmp_res["song_freqs"],
+                    cmp_res["song_mag"],
+                    cmp_res["perf_freqs"],
+                    cmp_res["perf_mag"],
+                    figsize=(6.4, 5),
+                )
+                st.pyplot(fig_cmp, use_container_width=True)
+                plt.close(fig_cmp)
+        else:
+            st.info(
+                "Nema spremljenog spektra s segmentima. Klikni „Izračunaj i prikaži spektre“ iznad, pa ponovno „Usporedi…“ da vidiš oba grafa jedno pokraj drugog."
+            )
+            fig_cmp = render_compare_figure(
+                cmp_res["song_freqs"],
+                cmp_res["song_mag"],
+                cmp_res["perf_freqs"],
+                cmp_res["perf_mag"],
+                figsize=(13, 6),
+            )
+            st.pyplot(fig_cmp, use_container_width=True)
+            plt.close(fig_cmp)
+    elif seg_cache is not None:
+        st.subheader("Spektar cijele pjesme i segmenti")
+        fig_seg = render_segment_spectrum_figure(seg_cache)
+        st.pyplot(fig_seg, use_container_width=True)
+        plt.close(fig_seg)
+
+    if seg_cache is not None:
+        st.write("**Sadržanost segmenta u pjesmi (dominantni vrhovi spektra):**")
+        for i, score in seg_cache["scores"]:
+            st.write(f"- Segment {i}: {score * 100:.1f}% poklapanja")
